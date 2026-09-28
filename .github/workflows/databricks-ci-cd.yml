@@ -1,0 +1,88 @@
+name: Databricks CI/CD
+
+on:
+  push:
+    branches:
+      - "feature/**"
+      - "dev"
+      - "main"
+
+  pull_request:
+    branches:
+      - "dev"
+      - "main"
+
+
+jobs:
+
+  validate-and-test:
+
+    name: Validate bundle & run notebook syntax checks
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - uses: actions/checkout@v4
+
+
+      - name: Set up Python
+
+        uses: actions/setup-python@v5
+
+        with:
+          python-version: "3.11"
+
+
+      - name: Install Databricks CLI
+
+        uses: databricks/setup-cli@main
+
+
+      - name: Validate bundle configuration
+
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+
+        run: databricks bundle validate --target dev
+
+
+      - name: Python syntax check
+
+        run: |
+          python -m compileall -q src
+
+
+      - name: Install test dependencies
+
+        run: pip install pyspark==3.5.3
+
+
+  deploy-dev:
+
+    name: Run VStone end-to-end Job
+
+    needs: validate-and-test
+
+    if: github.ref == 'refs/heads/dev' && github.event_name == 'push'
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - uses: actions/checkout@v4
+
+
+      - name: Install Databricks CLI
+
+        uses: databricks/setup-cli@main
+
+
+      - name: Run existing VStone end-to-end Job
+
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+
+        run: databricks jobs run-now 997291995396874
