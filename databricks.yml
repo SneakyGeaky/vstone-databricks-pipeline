@@ -1,0 +1,491 @@
+bundle:
+  name: vstone-databricks-pipeline
+
+# ── Compute ────────────────────────────────────────────────────────────────
+# No job_cluster_key / new_cluster is specified on ANY task in this file —
+# deliberate, not an oversight. FIXED from an earlier version that defined
+# a classic new_cluster (node_type_id, spark_version, num_workers) on every
+# job. Free Edition is serverless-only and doesn't support classic/managed
+# clusters at all (per the project brief) — that config would have failed
+# at deploy or first run. Omitting compute entirely on a notebook_task lets
+# Databricks Jobs use serverless automatically.
+
+# ── Variables ──────────────────────────────────────────────────────────────
+# Referenced as ${var.name} below and passed to every notebook as a widget
+# default, so nothing is hardcoded in notebook bodies (project requirement:
+# "No HARD CODING - USE Variables wherever possible").
+variables:
+  catalog_name:
+    description: "Unity Catalog catalog for this project"
+    default: "vstone_catalog"
+  raw_schema:
+    default: "raw"
+  bronze_schema:
+    default: "bronze"
+  silver_schema:
+    default: "silver"
+  gold_schema:
+    default: "gold"
+  security_schema:
+    default: "security"
+  profile_schema:
+    description: "Schema that stores data-profiling result tables (data_profile_columns / data_profile_checks)"
+    default: "raw"
+  landing_volume:
+    default: "landing"
+  chunks_volume:
+    default: "chunks"
+  checkpoints_volume:
+    default: "checkpoints"
+
+# ── Workspace ──────────────────────────────────────────────────────────────
+# TODO: replace with your own Databricks Free Edition workspace URL.
+# (The previous draft hardcoded a specific personal workspace host here —
+# removed since that URL is workspace-specific, not project config.)
+workspace:
+  host: https://<your-workspace>.cloud.databricks.com
+
+targets:
+  dev:
+    default: true
+    mode: development
+    # ${workspace.current_user.userName} resolves to whoever deploys the
+    # bundle — replaces the previous draft's hardcoded personal email path
+    # (which also had a typo: "vtsone" instead of "vstone").
+    workspace:
+      root_path: /Workspace/Users/${workspace.current_user.userName}/${bundle.name}
+
+# ── Jobs ───────────────────────────────────────────────────────────────────
+resources:
+  jobs:
+    data_chunking_job:
+      name: "Data Chunking"
+      tasks:
+        - task_key: "setup_infrastructure"
+          notebook_task:
+            notebook_path: "src/Notebooks/00_setup_infrastructure"
+            source: WORKSPACE
+            base_parameters:
+              catalog_name: ${var.catalog_name}
+              raw_schema: ${var.raw_schema}
+              bronze_schema: ${var.bronze_schema}
+              silver_schema: ${var.silver_schema}
+              gold_schema: ${var.gold_schema}
+              security_schema: ${var.security_schema}
+
+        - task_key: "profile_data"
+          depends_on:
+            - task_key: "setup_infrastructure"
+          notebook_task:
+            notebook_path: "src/Notebooks/01_data_profiling"
+            source: WORKSPACE
+            base_parameters:
+              catalog_name: ${var.catalog_name}
+              raw_schema: ${var.raw_schema}
+              landing_volume: ${var.landing_volume}
+              profile_schema: ${var.profile_schema}
+
+        - task_key: "test_profiling"
+          depends_on:
+            - task_key: "profile_data"
+          notebook_task:
+            notebook_path: "tests/test_data_profiling"
+            source: WORKSPACE
+            base_parameters:
+              catalog_name: ${var.catalog_name}
+              profile_schema: ${var.profile_schema}
+
+        - task_key: "chunk_data"
+          depends_on:
+            - task_key: "profile_data"
+          notebook_task:
+            notebook_path: "src/Notebooks/02_data_chunking"
+            source: WORKSPACE
+            base_parameters:
+              catalog_name: ${var.catalog_name}
+              raw_schema: ${var.raw_schema}
+              landing_volume: ${var.landing_volume}
+              chunks_volume: ${var.chunks_volume}
+              split_seed: "42"
+
+        - task_key: "test_chunking"
+          depends_on:
+            - task_key: "chunk_data"
+          notebook_task:
+            notebook_path: "tests/test_data_chunking"
+            source: WORKSPACE
+            base_parameters:
+              catalog_name: ${var.catalog_name}
+              raw_schema: ${var.raw_schema}
+              landing_volume: ${var.landing_volume}
+              chunks_volume: ${var.chunks_volume}
+
+      email_notifications:
+        on_failure:
+          - "${workspace.current_user.userName}"
+
+    bronze_ingestion_job:
+      name: "Bronze Ingestion"
+      tasks:
+        - task_key: "ingest_streets_copyinto"
+          notebook_task:
+            notebook_path: "src/Notebooks/03_bronze_csv_copyinto"
+            source: WORKSPACE
+            base_parameters:
+              catalog_name: ${var.catalog_name}
+              raw_schema: ${var.raw_schema}
+              bronze_schema: ${var.bronze_schema}
+              chunks_volume: ${var.chunks_volume}
+
+        - task_key: "test_bronze_ingestion"
+          depends_on:
+            - task_key: "ingest_streets_copyinto"
+          notebook_task:
+            notebook_path: "tests/test_bronze_ingestion"
+            source: WORKSPACE
+            base_parameters:
+              catalog_name: ${var.catalog_name}
+              bronze_schema: ${var.bronze_schema}
+
+      email_notifications:
+        on_failure:
+          - "${workspace.current_user.userName}"
+
+    bronze_day3_job:
+      name: "Bronze Ingestion Day 3"
+      tasks:
+        - task_key: "ingest_autoloader"
+          notebook_task:
+            notebook_path: "src/Notebooks/04_bronze_auto_loader"
+            source: WORKSPACE
+            base_parameters:
+              catalog_name: ${var.catalog_name}
+              raw_schema: ${var.raw_schema}
+              bronze_schema: ${var.bronze_schema}
+              chunks_volume: ${var.chunks_volume}
+              checkpoints_volume: ${var.checkpoints_volume}
+
+        - task_key: "ingest_xml"
+          notebook_task:
+            notebook_path: "src/Notebooks/05_bronze_xml_pyspark"
+            source: WORKSPACE
+            base_parameters:
+              catalog_name: ${var.catalog_name}
+              raw_schema: ${var.raw_schema}
+              bronze_schema: ${var.bronze_schema}
+              chunks_volume: ${var.chunks_volume}
+
+        - task_key: "run_dlt_pipeline"
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.bronze_dlt_pipeline.id}
+
+        - task_key: "test_day3_bronze"
+          depends_on:
+            - task_key: "ingest_autoloader"
+            - task_key: "ingest_xml"
+            - task_key: "run_dlt_pipeline"
+          notebook_task:
+            notebook_path: "tests/test_bronze_day3"
+            source: WORKSPACE
+            base_parameters:
+              catalog_name: ${var.catalog_name}
+              bronze_schema: ${var.bronze_schema}
+
+      email_notifications:
+        on_failure:
+          - "${workspace.current_user.userName}"
+
+    silver_day4_job:
+      name: "Silver Transformation Day 4"
+      tasks:
+        - task_key: "run_silver_pipeline"
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.silver_dlt_pipeline.id}
+          # Prerequisite: bronze_day3_job must have already run successfully —
+          # this reads from Bronze tables via streaming, it doesn't create them.
+
+        - task_key: "test_silver_day4"
+          depends_on:
+            - task_key: "run_silver_pipeline"
+          notebook_task:
+            notebook_path: "tests/test_silver_day4"
+            source: WORKSPACE
+            base_parameters:
+              catalog_name: ${var.catalog_name}
+              silver_schema: ${var.silver_schema}
+
+      email_notifications:
+        on_failure:
+          - "${workspace.current_user.userName}"
+
+    silver_business_day5_job:
+      name: "Silver Business Rules & ACID Demo Day 5"
+      tasks:
+        - task_key: "apply_business_rules"
+          notebook_task:
+            notebook_path: "src/Notebooks/11_silver_business_rules"
+            source: WORKSPACE
+            base_parameters:
+              catalog_name: ${var.catalog_name}
+              silver_schema: ${var.silver_schema}
+
+        - task_key: "acid_timetravel_demo"
+          depends_on:
+            - task_key: "apply_business_rules"
+          notebook_task:
+            notebook_path: "src/Notebooks/12_delta_acid_timetravel_demo"
+            source: WORKSPACE
+            base_parameters:
+              catalog_name: ${var.catalog_name}
+              silver_schema: ${var.silver_schema}
+
+        - task_key: "test_business_rules_day5"
+          depends_on:
+            - task_key: "acid_timetravel_demo"
+          notebook_task:
+            notebook_path: "tests/test_business_rules_day5"
+            source: WORKSPACE
+            base_parameters:
+              catalog_name: ${var.catalog_name}
+              silver_schema: ${var.silver_schema}
+
+      email_notifications:
+        on_failure:
+          - "${workspace.current_user.userName}"
+
+    gold_day6_job:
+      name: "Gold Layer Day 6"
+      tasks:
+        - task_key: "run_gold_pipeline"
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.gold_dlt_pipeline.id}
+          # Prerequisite: silver_day4_job and silver_business_day5_job must
+          # have already run — Gold reads from Silver tables, doesn't create them.
+
+        - task_key: "test_gold_day6"
+          depends_on:
+            - task_key: "run_gold_pipeline"
+          notebook_task:
+            notebook_path: "tests/test_gold_day6"
+            source: WORKSPACE
+            base_parameters:
+              catalog_name: ${var.catalog_name}
+              gold_schema: ${var.gold_schema}
+
+      email_notifications:
+        on_failure:
+          - "${workspace.current_user.userName}"
+
+    day7_performance_job:
+      name: "Performance Optimization & Churn Day 7"
+      tasks:
+        - task_key: "benchmark_liquid_vs_zorder"
+          notebook_task:
+            notebook_path: "src/Notebooks/16_gold_performance_optimization"
+            source: WORKSPACE
+            base_parameters:
+              catalog_name: ${var.catalog_name}
+              gold_schema: ${var.gold_schema}
+
+        - task_key: "merge_incremental_demo"
+          depends_on:
+            - task_key: "benchmark_liquid_vs_zorder"
+          notebook_task:
+            notebook_path: "src/Notebooks/17_gold_merge_incremental"
+            source: WORKSPACE
+            base_parameters:
+              catalog_name: ${var.catalog_name}
+              gold_schema: ${var.gold_schema}
+
+        - task_key: "churn_metrics"
+          depends_on:
+            - task_key: "merge_incremental_demo"
+          notebook_task:
+            notebook_path: "src/Notebooks/18_gold_churn_metrics"
+            source: WORKSPACE
+            base_parameters:
+              catalog_name: ${var.catalog_name}
+              gold_schema: ${var.gold_schema}
+
+        - task_key: "test_performance_day7"
+          depends_on:
+            - task_key: "churn_metrics"
+          notebook_task:
+            notebook_path: "tests/test_performance_day7"
+            source: WORKSPACE
+            base_parameters:
+              catalog_name: ${var.catalog_name}
+              gold_schema: ${var.gold_schema}
+
+      email_notifications:
+        on_failure:
+          - "${workspace.current_user.userName}"
+
+    # Optional — NOT a PDF-required deliverable, and deliberately not part
+    # of end_to_end_pipeline_job's chain, which should match exactly what
+    # the PDF requires. Run standalone: `databricks bundle run
+    # traffic_insights_job --target dev`.
+    traffic_insights_job:
+      name: "Traffic Insights Dashboard Queries"
+      tasks:
+        - task_key: "run_dashboard_queries"
+          notebook_task:
+            notebook_path: "src/Notebooks/22_traffic_insights_queries"
+            source: WORKSPACE
+
+    governance_day8_job:
+      name: "Governance & Usage Analysis Day 8-9"
+      tasks:
+        - task_key: "apply_rls"
+          notebook_task:
+            notebook_path: "src/Notebooks/19_governance_rls"
+            source: WORKSPACE
+
+        - task_key: "apply_cls"
+          depends_on:
+            - task_key: "apply_rls"
+          notebook_task:
+            notebook_path: "src/Notebooks/20_governance_cls"
+            source: WORKSPACE
+
+        - task_key: "usage_analysis"
+          depends_on:
+            - task_key: "apply_cls"
+          notebook_task:
+            notebook_path: "src/Notebooks/21_usage_analysis"
+            source: WORKSPACE
+
+        - task_key: "test_governance_day8"
+          depends_on:
+            - task_key: "usage_analysis"
+          notebook_task:
+            notebook_path: "tests/test_governance_day8"
+            source: WORKSPACE
+
+      email_notifications:
+        on_failure:
+          - "${workspace.current_user.userName}"
+
+    # Master orchestration job — chains every prior day's job via
+    # run_job_task, in dependency order. Satisfies "Configure Databricks
+    # Jobs to orchestrate pipelines" as a single cohesive whole, and is
+    # what Day 10's "candidate demo of Bronze -> Silver -> Gold" runs.
+    # NOTE: each referenced job must already exist in this same bundle
+    # deployment for ${resources.jobs.<name>.id} to resolve.
+    end_to_end_pipeline_job:
+      name: "VStone End-to-End Pipeline (Day 1-9)"
+      tasks:
+        - task_key: "day1_chunking"
+          run_job_task:
+            job_id: ${resources.jobs.data_chunking_job.id}
+
+        - task_key: "day2_bronze_copyinto"
+          depends_on:
+            - task_key: "day1_chunking"
+          run_job_task:
+            job_id: ${resources.jobs.bronze_ingestion_job.id}
+
+        - task_key: "day3_bronze_remaining"
+          depends_on:
+            - task_key: "day2_bronze_copyinto"
+          run_job_task:
+            job_id: ${resources.jobs.bronze_day3_job.id}
+
+        - task_key: "day4_silver"
+          depends_on:
+            - task_key: "day3_bronze_remaining"
+          run_job_task:
+            job_id: ${resources.jobs.silver_day4_job.id}
+
+        - task_key: "day5_silver_business_rules"
+          depends_on:
+            - task_key: "day4_silver"
+          run_job_task:
+            job_id: ${resources.jobs.silver_business_day5_job.id}
+
+        - task_key: "day6_gold"
+          depends_on:
+            - task_key: "day5_silver_business_rules"
+          run_job_task:
+            job_id: ${resources.jobs.gold_day6_job.id}
+
+        - task_key: "day7_performance"
+          depends_on:
+            - task_key: "day6_gold"
+          run_job_task:
+            job_id: ${resources.jobs.day7_performance_job.id}
+
+        - task_key: "day8_governance"
+          depends_on:
+            - task_key: "day7_performance"
+          run_job_task:
+            job_id: ${resources.jobs.governance_day8_job.id}
+
+        - task_key: "day9_final_integration_test"
+          depends_on:
+            - task_key: "day8_governance"
+          notebook_task:
+            notebook_path: "tests/test_final_integration_day9"
+            source: WORKSPACE
+
+      email_notifications:
+        on_failure:
+          - "${workspace.current_user.userName}"
+
+  pipelines:
+    bronze_dlt_pipeline:
+      name: "Bronze DLT Pipeline"
+      catalog: ${var.catalog_name}
+      target: ${var.bronze_schema}
+      serverless: true  # CHANGE: Free Edition is serverless-only — without
+                         # this the pipeline tries to provision a classic
+                         # cluster and fails to run.
+      libraries:
+        - notebook:
+            path: "src/Notebooks/06_bronze_dlt"
+        - notebook:
+            path: "src/Notebooks/07_remaining_files_dlt"
+      configuration:
+        catalog_name: ${var.catalog_name}
+        raw_schema: ${var.raw_schema}
+        chunks_volume: ${var.chunks_volume}
+        landing_volume: ${var.landing_volume}
+      development: true  # dev target only — set false for a prod pipeline
+
+    silver_dlt_pipeline:
+      name: "Silver DLT Pipeline"
+      catalog: ${var.catalog_name}
+      target: ${var.silver_schema}
+      serverless: true  # CHANGE: same fix as bronze_dlt_pipeline
+      libraries:
+        - notebook:
+            path: "src/Notebooks/09_silver_streets"
+        - notebook:
+            path: "src/Notebooks/10_silver_other"
+      configuration:
+        pipeline.catalog: ${var.catalog_name}
+        pipeline.bronze_schema: ${var.bronze_schema}
+        pipeline.silver_schema: ${var.silver_schema}
+      development: true
+
+    gold_dlt_pipeline:
+      name: "Gold DLT Pipeline"
+      catalog: ${var.catalog_name}
+      target: ${var.gold_schema}
+      serverless: true  # CHANGE: same fix as bronze_dlt_pipeline
+      libraries:
+        - notebook:
+            path: "src/Notebooks/13_gold_dimensions"
+        - notebook:
+            path: "src/Notebooks/14_gold_facts"
+        - notebook:
+            path: "src/Notebooks/15_gold_aggregates"
+      configuration:
+        pipeline.catalog: ${var.catalog_name}
+        pipeline.silver_schema: ${var.silver_schema}
+      development: true
+
+# NOTE: Day 10 is next — final demo, case study PPT, Gold ER diagram
+# handoff, dashboard, and merging dev to main for production release.
+# end_to_end_pipeline_job (Day 1-9, ending in the integration test) is
+# what that demo actually runs.
