@@ -1,0 +1,761 @@
+{
+  "datasets": [
+    {
+      "name": "08299ece",
+      "displayName": "Top 10 Streets Trend",
+      "config": {
+        "version": "1.1",
+        "source": "SELECT\r\n    t.month_year,\r\n    t.street_name,\r\n    t.avg_pollution,\r\n    t.avg_noise,\r\n    t.reading_count\r\nFROM vstone_catalog.gold.agg_monthly_street_trend t\r\nJOIN (\r\n    SELECT street_id\r\n    FROM vstone_catalog.gold.agg_top10_streets_by_pollution\r\n) top\r\nON t.street_id = top.street_id\r\nORDER BY t.month_year, t.avg_pollution DESC",
+        "dimensions": [
+          {
+            "expr": "source.*"
+          }
+        ],
+        "measures": [
+          {
+            "name": "count",
+            "expr": "COUNT(*)",
+            "comment": "Represents the total number of rows in the dataset. Use this measure to count all",
+            "displayName": "Count"
+          }
+        ]
+      }
+    },
+    {
+      "name": "2fc57365",
+      "displayName": "Top 10 Pollution Leaderboard",
+      "config": {
+        "version": "1.1",
+        "source": "SELECT\r\n    street_name,\r\n    avg_pollution,\r\n    avg_noise,\r\n    reading_count\r\nFROM vstone_catalog.gold.agg_top10_streets_by_pollution\r\nORDER BY avg_pollution DESC",
+        "dimensions": [
+          {
+            "expr": "source.*"
+          }
+        ],
+        "measures": [
+          {
+            "name": "count",
+            "expr": "COUNT(*)",
+            "comment": "Represents the total number of rows in the dataset. Use this measure to count all",
+            "displayName": "Count"
+          }
+        ]
+      }
+    },
+    {
+      "name": "1eabb885",
+      "displayName": "Traffic by Sensor Node",
+      "config": {
+        "version": "1.1",
+        "source": "SELECT\r\n    location,\r\n    latitude,\r\n    longitude,\r\n    SUM(total_enter) AS total_enter,\r\n    SUM(total_exit) AS total_exit,\r\n    ROUND(AVG(total_enter + total_exit), 1) AS avg_daily_volume\r\nFROM vstone_catalog.gold.agg_traffic_by_location_daily\r\nGROUP BY\r\n    location,\r\n    latitude,\r\n    longitude\r\nORDER BY avg_daily_volume DESC",
+        "dimensions": [
+          {
+            "expr": "source.*"
+          }
+        ],
+        "measures": [
+          {
+            "name": "count",
+            "expr": "COUNT(*)",
+            "comment": "Represents the total number of rows in the dataset. Use this measure to count all",
+            "displayName": "Count"
+          }
+        ]
+      }
+    },
+    {
+      "name": "de0f5993",
+      "displayName": "Traffic Volume Trend",
+      "config": {
+        "version": "1.1",
+        "source": "SELECT\r\n    reading_date,\r\n    SUM(total_enter) AS total_enter,\r\n    SUM(total_exit) AS total_exit\r\nFROM vstone_catalog.gold.agg_traffic_by_location_daily\r\nGROUP BY reading_date\r\nORDER BY reading_date",
+        "dimensions": [
+          {
+            "expr": "source.*"
+          }
+        ],
+        "measures": [
+          {
+            "name": "count",
+            "expr": "COUNT(*)",
+            "comment": "Represents the total number of rows in the dataset. Use this measure to count all",
+            "displayName": "Count"
+          }
+        ]
+      }
+    },
+    {
+      "name": "dd3fe931",
+      "displayName": "Create the Street Activity dataset",
+      "config": {
+        "version": "1.1",
+        "source": "SELECT\r\n    churn_status,\r\n    COUNT(*) AS street_count,\r\n    ROUND(AVG(total_reports), 1) AS avg_reports\r\nFROM vstone_catalog.gold.agg_stale_streets\r\nGROUP BY churn_status\r\nORDER BY street_count DESC",
+        "dimensions": [
+          {
+            "expr": "source.*"
+          }
+        ],
+        "measures": [
+          {
+            "name": "count",
+            "expr": "COUNT(*)",
+            "comment": "Represents the total number of rows in the dataset. Use this measure to count all",
+            "displayName": "Count"
+          }
+        ]
+      }
+    },
+    {
+      "name": "59c1d24b",
+      "displayName": "Citizen Reports by Street",
+      "config": {
+        "version": "1.1",
+        "source": "SELECT\r\n    month_year,\r\n    street_name,\r\n    report_count\r\nFROM vstone_catalog.gold.agg_citizen_reports_by_street\r\nORDER BY month_year, report_count DESC",
+        "dimensions": [
+          {
+            "expr": "source.*"
+          }
+        ],
+        "measures": [
+          {
+            "name": "count",
+            "expr": "COUNT(*)",
+            "comment": "Represents the total number of rows in the dataset. Use this measure to count all",
+            "displayName": "Count"
+          }
+        ]
+      }
+    },
+    {
+      "name": "0a303ec3",
+      "displayName": "dim_street",
+      "config": {
+        "version": "1.1",
+        "source": "vstone_catalog.gold.dim_street",
+        "dimensions": [
+          {
+            "expr": "source.*"
+          }
+        ],
+        "measures": [
+          {
+            "name": "count",
+            "expr": "COUNT(*)",
+            "comment": "Represents the total number of rows in the dataset. Use this measure to count all",
+            "displayName": "Count"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a76ad99b",
+      "displayName": "Street Count",
+      "queryLines": [
+        "SELECT\r\n",
+        "    COUNT(*) AS street_count\r\n",
+        "FROM vstone_catalog.gold.dim_street\r\n",
+        "WHERE __END_AT IS NULL"
+      ],
+      "catalog": "vstone_catalog",
+      "schema": "gold"
+    }
+  ],
+  "pages": [
+    {
+      "name": "18fad3d0",
+      "displayName": "Traffic Insights",
+      "layout": [
+        {
+          "widget": {
+            "name": "6aa7e0dd",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "08299ece",
+                  "fields": [
+                    {
+                      "name": "street_name",
+                      "expression": "`street_name`"
+                    },
+                    {
+                      "name": "month_year",
+                      "expression": "`month_year`"
+                    },
+                    {
+                      "name": "avg(avg_pollution)",
+                      "expression": "AVG(`avg_pollution`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Pollution Trend — Top 10 Streets",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "month_year",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "avg(avg_pollution)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "street_name",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 12,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "e2f75452",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "08299ece",
+                  "fields": [
+                    {
+                      "name": "street_name",
+                      "expression": "`street_name`"
+                    },
+                    {
+                      "name": "avg(avg_pollution)",
+                      "expression": "AVG(`avg_pollution`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Top 10 Streets by Pollution",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "street_name",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "avg(avg_pollution)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "street_name",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 8,
+            "width": 7,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "6e08c15c",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "1eabb885",
+                  "fields": [
+                    {
+                      "name": "location",
+                      "expression": "`location`"
+                    },
+                    {
+                      "name": "latitude",
+                      "expression": "`latitude`"
+                    },
+                    {
+                      "name": "longitude",
+                      "expression": "`longitude`"
+                    },
+                    {
+                      "name": "avg(avg_daily_volume)",
+                      "expression": "AVG(`avg_daily_volume`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Traffic Volume by Sensor Node",
+                  "fields": []
+                }
+              },
+              "version": 2,
+              "widgetType": "symbol-map",
+              "encodings": {
+                "coordinates": {
+                  "coordinateType": "longitude-latitude",
+                  "latitude": {
+                    "fieldName": "latitude"
+                  },
+                  "longitude": {
+                    "fieldName": "longitude"
+                  }
+                },
+                "color": {
+                  "fieldName": "location",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "size": {
+                  "fieldName": "avg(avg_daily_volume)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 7,
+            "y": 8,
+            "width": 5,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "36f70de5",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "de0f5993",
+                  "fields": [
+                    {
+                      "name": "reading_date",
+                      "expression": "`reading_date`"
+                    },
+                    {
+                      "name": "sum(total_enter)",
+                      "expression": "SUM(`total_enter`)"
+                    },
+                    {
+                      "name": "sum(total_exit)",
+                      "expression": "SUM(`total_exit`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Traffic Volume Over Time",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "mark": {
+                "colors": [
+                  "#1E88E5",
+                  "#FFA726"
+                ],
+                "layout": "stack"
+              },
+              "widgetType": "area",
+              "encodings": {
+                "x": {
+                  "fieldName": "reading_date",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fields": [
+                    {
+                      "fieldName": "sum(total_enter)"
+                    },
+                    {
+                      "fieldName": "sum(total_exit)"
+                    }
+                  ],
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "legend": {
+                    "position": "right"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 13,
+            "width": 12,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "4b6187bc",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "dd3fe931",
+                  "fields": [
+                    {
+                      "name": "sum(street_count)",
+                      "expression": "SUM(`street_count`)"
+                    },
+                    {
+                      "name": "churn_status",
+                      "expression": "`churn_status`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Street Activity Status",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "widgetType": "pie",
+              "encodings": {
+                "angle": {
+                  "fieldName": "sum(street_count)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "churn_status",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 19,
+            "width": 5,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "c7c61670",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "59c1d24b",
+                  "fields": [
+                    {
+                      "name": "street_name",
+                      "expression": "`street_name`"
+                    },
+                    {
+                      "name": "month_year",
+                      "expression": "`month_year`"
+                    },
+                    {
+                      "name": "sum(report_count)",
+                      "expression": "SUM(`report_count`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Citizen Reports by Street",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "mark": {
+                "layout": "stack"
+              },
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "month_year",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(report_count)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "street_name",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 5,
+            "y": 19,
+            "width": 7,
+            "height": 5
+          }
+        },
+        {
+          "widget": {
+            "name": "1bc693d5",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "a76ad99b",
+                  "fields": [
+                    {
+                      "name": "sum(street_count)",
+                      "expression": "SUM(`street_count`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Streets Monitored",
+                  "fields": []
+                }
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(street_count)"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 4,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "d4e16cdd",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "2fc57365",
+                  "fields": [
+                    {
+                      "name": "avg(avg_pollution)",
+                      "expression": "AVG(`avg_pollution`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Avg Pollution — Top 10",
+                  "fields": []
+                }
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "avg(avg_pollution)"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 0,
+            "width": 4,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "b5bdba05",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "1eabb885",
+                  "fields": [
+                    {
+                      "name": "sum(avg_daily_volume)",
+                      "expression": "SUM(`avg_daily_volume`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Avg Daily Network Traffic"
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(avg_daily_volume)"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 0,
+            "width": 4,
+            "height": 3
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "ebb83fc6",
+      "displayName": "Global Filters",
+      "layout": [
+        {
+          "widget": {
+            "name": "street",
+            "spec": {
+              "version": 2,
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Street",
+                  "fields": []
+                }
+              },
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": []
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 1,
+            "height": 2
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_GLOBAL_FILTERS",
+      "layoutVersion": "GRID_V1"
+    }
+  ],
+  "uiSettings": {
+    "theme": {
+      "widgetHeaderAlignment": "ALIGNMENT_UNSPECIFIED"
+    },
+    "applyModeEnabled": false
+  }
+}
