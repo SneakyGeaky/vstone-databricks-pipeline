@@ -1,0 +1,159 @@
+{
+  "datasets": [
+    {
+      "name": "0256ce8a",
+      "displayName": "DBU usage by resource group, last 7 days",
+      "queryLines": [
+        "SELECT\r\n",
+        "    usage_date,\r\n",
+        "    sku_name,\r\n",
+        "    CASE\r\n",
+        "        WHEN sku_name LIKE '%DLT%' THEN 'DLT Pipelines (bronze/silver/gold)'\r\n",
+        "        WHEN sku_name LIKE '%JOBS%' THEN 'Jobs (chunking/bronze/silver/gold/day7)'\r\n",
+        "        ELSE 'Other'\r\n",
+        "    END AS resource_group,\r\n",
+        "    SUM(usage_quantity) AS total_dbus\r\n",
+        "FROM system.billing.usage\r\n",
+        "WHERE usage_date >= CURRENT_DATE() - INTERVAL 7 DAYS\r\n",
+        "  AND usage_unit = 'DBU'\r\n",
+        "GROUP BY 1, 2, 3\r\n",
+        "ORDER BY 1 DESC"
+      ],
+      "catalog": "vstone_catalog",
+      "schema": "default"
+    },
+    {
+      "name": "c7a3c577",
+      "displayName": "Billing Usage Analysis by Run Type and Cost Share",
+      "queryLines": [
+        "SELECT\r\n",
+        "    CASE\r\n",
+        "        WHEN sku_name LIKE '%ALL_PURPOSE%' THEN 'Manual / Interactive (expensive)'\r\n",
+        "        ELSE 'Automated Production (optimized)'\r\n",
+        "    END AS run_type,\r\n",
+        "    SUM(usage_quantity) AS total_dbus,\r\n",
+        "    ROUND((SUM(usage_quantity) / SUM(SUM(usage_quantity)) OVER()) * 100, 2) AS cost_percentage\r\n",
+        "FROM system.billing.usage\r\n",
+        "WHERE usage_date >= CURRENT_DATE() - INTERVAL 30 DAYS\r\n",
+        "GROUP BY 1"
+      ],
+      "catalog": "vstone_catalog",
+      "schema": "default"
+    },
+    {
+      "name": "56fca0fd",
+      "displayName": "Automated (Jobs/DLT) vs. interactive (all-purpose cluster) cost",
+      "queryLines": [
+        "SELECT\r\n",
+        "    CASE\r\n",
+        "        WHEN sku_name LIKE '%ALL_PURPOSE%' THEN 'Manual / Interactive (expensive)'\r\n",
+        "        ELSE 'Automated Production (optimized)'\r\n",
+        "    END AS run_type,\r\n",
+        "    SUM(usage_quantity) AS total_dbus,\r\n",
+        "    ROUND((SUM(usage_quantity) / SUM(SUM(usage_quantity)) OVER()) * 100, 2) AS cost_percentage\r\n",
+        "FROM system.billing.usage\r\n",
+        "WHERE usage_date >= CURRENT_DATE() - INTERVAL 30 DAYS\r\n",
+        "GROUP BY 1"
+      ]
+    },
+    {
+      "name": "4269e26e",
+      "displayName": "DBU consumption trend by resource type, last 14 days",
+      "queryLines": [
+        "SELECT\r\n",
+        "    usage_date,\r\n",
+        "    CASE\r\n",
+        "        WHEN sku_name LIKE '%DLT%' THEN 'DLT Pipelines'\r\n",
+        "        WHEN sku_name LIKE '%JOBS%' THEN 'Automated Jobs'\r\n",
+        "        ELSE 'Interactive/Manual'\r\n",
+        "    END AS usage_source,\r\n",
+        "    SUM(usage_quantity) AS dbus\r\n",
+        "FROM system.billing.usage\r\n",
+        "WHERE usage_date >= CURRENT_DATE() - INTERVAL 14 DAYS\r\n",
+        "GROUP BY 1, 2\r\n",
+        "ORDER BY 1"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "c47a5314",
+      "displayName": "Resource Usage",
+      "layout": [
+        {
+          "widget": {
+            "name": "406081c5",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "4269e26e",
+                  "fields": [
+                    {
+                      "name": "usage_source",
+                      "expression": "`usage_source`"
+                    },
+                    {
+                      "name": "usage_date",
+                      "expression": "`usage_date`"
+                    },
+                    {
+                      "name": "sum(dbus)",
+                      "expression": "SUM(`dbus`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Daily DBU Consumption Trend"
+              },
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "usage_date",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(dbus)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "usage_source",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 1,
+            "width": 6,
+            "height": 6
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    }
+  ],
+  "uiSettings": {
+    "theme": {
+      "widgetHeaderAlignment": "ALIGNMENT_UNSPECIFIED"
+    },
+    "applyModeEnabled": false
+  }
+}
