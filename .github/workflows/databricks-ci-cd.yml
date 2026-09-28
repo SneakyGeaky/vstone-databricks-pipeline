@@ -51,7 +51,7 @@ jobs:
       - name: Python syntax check
 
         run: |
-          run: python -m compileall -q src
+          python -m compileall -q src
 
 
       - name: Install test dependencies
