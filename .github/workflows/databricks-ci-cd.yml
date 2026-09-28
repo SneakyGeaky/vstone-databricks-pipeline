@@ -1,0 +1,87 @@
+name: Databricks CI/CD
+
+# Feature branches: validate + lint only.
+# dev branch: validate + deploy to the dev target after merge.
+# main branch: validate + deploy to prod (added once a prod target exists —
+# see databricks.yml note; kept out for now rather than defining a target
+# with no matching workspace config, per "no unnecessary hard-coded values").
+on:
+  push:
+    branches:
+      - "feature/**"
+      - "dev"
+      - "main"
+  pull_request:
+    branches:
+      - "dev"
+      - "main"
+
+jobs:
+  validate-and-test:
+    name: Validate bundle & run notebook syntax checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Databricks CLI
+        uses: databricks/setup-cli@main
+
+      - name: Validate bundle configuration
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+        run: databricks bundle validate
+
+      - name: Python syntax check (notebooks + utils)
+        run: |
+          python -m py_compile src/Notebooks/*.py src/utils/*.py tests/*.py
+
+      - name: Install test dependencies
+        run: pip install pyspark==3.5.3
+
+      - name: Run local-runnable unit tests
+        run: |
+          # Notebook-embedded tests that require dbutils/Unity Catalog run as
+          # a job task in Databricks (see test_chunking task in databricks.yml).
+          # This step covers anything importable outside a Databricks runtime.
+          python -c "import sys; sys.path.append('.'); from src.utils.chunk_io import reconcile_chunks; \
+            passed, s = reconcile_chunks(100, {'a': 60, 'b': 40}); assert passed, s; print('chunk_io unit check passed')"
+  
+  deploy-dev:
+    name: Deploy to dev target
+    needs: validate-and-test
+    if: github.ref == 'refs/heads/dev' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Databricks CLI
+        uses: databricks/setup-cli@main
+
+      - name: Deploy bundle to dev
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+        run: databricks bundle deploy --target dev
+
+      - name: Run full pipeline (Day 1-9, ending in integration tests)
+        # UPDATED from `data_chunking_job` — that was correct on Day 1 when
+        # it was the only job that existed, but running just the chunking
+        # job on every push stopped meaningfully validating anything once
+        # 8 more jobs and end_to_end_pipeline_job (which chains all of them
+        # via run_job_task, ending in test_final_integration_day9) existed.
+        # This runs the whole system, not just its first step — matches the
+        # PDF's Day 8-9 ask for "final integration testing in dev branch."
+        # Tradeoff worth knowing: this is the right call at this project's
+        # scale/commit frequency; a high-commit-frequency production repo
+        # would more likely want a fast smoke-test job on every push and
+        # this full run on a schedule or merge-to-main instead.
+        env:
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+        run: databricks bundle run end_to_end_pipeline_job --target dev
