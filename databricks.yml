@@ -43,7 +43,7 @@ variables:
 # (The previous draft hardcoded a specific personal workspace host here —
 # removed since that URL is workspace-specific, not project config.)
 workspace:
-  host: https://<your-workspace>.cloud.databricks.com
+  host: https://dbc-97ac2009-1a9a.cloud.databricks.com
 
 targets:
   dev:
