@@ -60,10 +60,9 @@ jobs:
 
 
       - name: Run local-runnable unit tests
-        env:
-          PYTHONPATH: ${{ github.workspace }}/src
+        working-directory: ${{ github.workspace }}
         run: |
-          python -c "from utils.chunk_io import reconcile_chunks; passed, s = reconcile_chunks(100, {'a': 60, 'b': 40}); assert passed, s; print('chunk_io unit check passed')"
+          python -c "import sys; sys.path.insert(0, 'src'); from utils.chunk_io import reconcile_chunks; passed, s = reconcile_chunks(100, {'a': 60, 'b': 40}); assert passed, s; print('chunk_io unit check passed')"
 
 
   deploy-dev:
