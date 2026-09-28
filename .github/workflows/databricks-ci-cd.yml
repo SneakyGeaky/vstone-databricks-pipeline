@@ -51,7 +51,7 @@ jobs:
       - name: Python syntax check
 
         run: |
-          python -m py_compile src/Notebooks/*.py src/utils/*.py tests/*.py
+          run: python -m compileall -q src
 
 
       - name: Install test dependencies
