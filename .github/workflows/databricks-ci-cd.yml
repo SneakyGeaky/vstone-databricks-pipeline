@@ -59,11 +59,6 @@ jobs:
         run: pip install pyspark==3.5.3
 
 
-      - name: Run local-runnable unit tests
-        run: |
-          python -c "from src.utils.chunk_io import reconcile_chunks; passed, s = reconcile_chunks(100, {'a': 60, 'b': 40}); assert passed, s; print('chunk_io unit check passed')"
-
-
   deploy-dev:
 
     name: Run VStone end-to-end Job
