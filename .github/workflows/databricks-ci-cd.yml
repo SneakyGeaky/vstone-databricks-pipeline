@@ -78,11 +78,14 @@ jobs:
 
         uses: databricks/setup-cli@main
 
+      - name: Deploy bundle
+      env:
+        DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+        DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+      run: databricks bundle deploy --target dev
 
-      - name: Run existing VStone end-to-end Job
-
+      - name: Run VStone end-to-end Job
         env:
           DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
           DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
-
-        run: databricks jobs run-now 997291995396874
+        run: databricks bundle run vstone_end_to_end_job --target dev
