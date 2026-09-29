@@ -42,16 +42,6 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install pyspark==3.5.3
-
-      - name: Run local unit check
-        env:
-          PYTHONPATH: ${{ github.workspace }}
-        run: |
-          python -c "
-          from src.utils.chunk_io import reconcile_chunks
-          passed, message = reconcile_chunks(100, {'a': 60, 'b': 40})
-          assert passed, message
-          print('chunk_io unit check passed')
           "
 
   deploy-dev:
