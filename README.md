@@ -1,82 +1,97 @@
 # vstone-databricks-pipeline
 
 End-to-end Databricks medallion pipeline (Bronze → Silver → Gold) for a
-Valencia smart-city traffic dataset: sensor vehicle counts + citizen incident
-reports, built on Databricks Free Edition (serverless), Unity Catalog, and
-Databricks Asset Bundles.
+Valencia smart-city traffic dataset: street sensor readings, vehicle
+counts, and citizen incident reports, built on Databricks Free Edition
+(serverless), Unity Catalog, Delta Live Tables, and Databricks Asset
+Bundles.
 
 > **Status: Day 10 of 10 — all deliverables built.** See
 > `docs/day10_final_deliverables_checklist.md` for the honest final
 > self-assessment (what's tested, what's still open, what needs a real
 > workspace run to confirm). `docs/requirements_and_assumptions.md` has
-> the full assumption log including corrections found and fixed along the
-> way; `docs/data_mapping.md` covers how this project adapts the reference
-> project's patterns to VStone's own datasets; `deliverables/vstone_case_study.pptx`
-> is the Day 10 case study walkthrough.
+> the full assumption log, including every correction found and fixed
+> along the way with real numbers, not smoothed over.
+> `deliverables/vstone_case_study.pptx` is the Day 10 case study walkthrough.
 
 ## Project overview
 
-Four raw files land in a Unity Catalog Volume and flow through Bronze → Silver
-→ Gold, using four different ingestion techniques on the primary fact table
-(COPY INTO, Delta Live Tables, Auto Loader, PySpark native XML) as required by
-the project brief, plus governance (RLS/CLS/dynamic masking), SCD2 dimensions,
-Liquid Clustering vs. partitioning benchmarking, and a Genie space on the
-aggregate layer in later days.
+Five raw files land in a Unity Catalog Volume and flow through Bronze →
+Silver → Gold. `streets.csv` (the largest file, ~87.8M rows) is split into
+4 chunks to demonstrate all 4 required ingestion techniques — COPY INTO,
+Delta Live Tables, Auto Loader, PySpark native XML. `cars.csv`,
+`telegram.csv`, `node_locations.csv`, `streets_list.csv` are loaded whole
+via DLT. Gold is a star schema with SCD2 dimensions, business rules, ACID/
+time-travel evidence, Liquid Clustering vs. partitioning benchmarking,
+churn-style metrics, row/column-level security, and two dashboards.
 
 ## Data sources
 
 | File | Rows | What it is |
 |---|---|---|
-| `cars.csv` | 24,681,794 | Vehicle-count events at 14 traffic sensor nodes, `2023-06-02`→`2024-03-10`. **Primary fact table — chunked into 4 formats.** |
-| `telegram.csv` | 128,440 | Free-text citizen traffic/incident reports for the same period. |
-| `node_locations.csv` | 14 | Sensor coordinates (lat/long) — one row per `cars.csv.location` value. |
-| `streets_list.csv` | 36 | Street master list with length and a danger score — joined to `telegram.csv` by street name. |
+| `streets.csv` | 87,820,725 | Street sensor readings (noise, pollution, light, rain), every 10s. **Primary fact table — chunked into 4 formats.** |
+| `cars.csv` | 24,681,794 | Vehicle-count events at 14 traffic sensor nodes. Whole-load. |
+| `telegram.csv` | 128,440 | Free-text citizen traffic/incident reports. Whole-load. |
+| `streets_list.csv` | 36 | Street dimension — length, coordinates, danger score. SCD2 in Gold. |
+| `node_locations.csv` | 14 | Sensor-node dimension — coordinates. SCD2 in Gold. |
 
-Full profiling output, null/duplicate checks, and known data-quality issues
-(one sensor with invalid coordinates, no shared key between the two dimension
-files) are in `docs/requirements_and_assumptions.md`.
+Full profiling output, every data-quality issue found, and every
+assumption (including ones later proven wrong and corrected with real
+evidence) are in `docs/requirements_and_assumptions.md`.
 
 ## Architecture
 
 ```
-cars.csv (landing volume)
+streets.csv (landing volume)
    │
-   ├── 50% ──► cars_chunk_1.csv  ──► Bronze (COPY INTO)         [Day 2]
-   ├── 20% ──► cars_chunk_2.csv  ──► Bronze (Delta Live Tables) [Day 3]
-   ├── 20% ──► cars_chunk_3.json ──► Bronze (Auto Loader)       [Day 3]
-   └── 10% ──► cars_chunk_4.xml  ──► Bronze (PySpark native XML)[Day 3]
+   ├── 50% ──► streets_chunk_1.csv  ──► Bronze (COPY INTO)          [Day 2]
+   ├── 20% ──► streets_chunk_2.csv  ──► Bronze (Delta Live Tables)  [Day 3]
+   ├── 20% ──► streets_chunk_3.json ──► Bronze (Auto Loader)        [Day 3]
+   └── 10% ──► streets_chunk_4.xml  ──► Bronze (PySpark native XML) [Day 3]
 
-telegram.csv, node_locations.csv, streets_list.csv (landing volume)
-   └── loaded whole ──► Bronze (DLT)                            [Day 3]
+cars.csv, telegram.csv, node_locations.csv, streets_list.csv (landing volume)
+   └── loaded whole ──► Bronze (DLT, streaming cloudFiles + pathGlobFilter) [Day 3]
 
-Bronze ──► Silver (clean, dedupe, standardize, quarantine)      [Day 4-5]
-       ──► Gold (star schema, SCD2 dims, aggregates)             [Day 6-7]
-       ──► Governance (RLS/CLS/masking), Jobs, Dashboards        [Day 8-9]
+Bronze ──► Silver (clean, dedupe on CONFIRMED grains, quarantine, pandas UDFs)  [Day 4]
+       ──► streets_business (raining clipped to [0,100], ACID/time-travel demo) [Day 5]
+       ──► Gold (star schema: 3 dims incl. 2 SCD2, 3 facts, 4 aggregates)        [Day 6]
+       ──► Liquid Clustering vs. Partition+Z-Order benchmark, MERGE, churn      [Day 7]
+       ──► Governance (RLS/CLS), resource usage dashboard, job orchestration   [Day 8-9]
+       ──► Case study, traffic insights dashboard, full pipeline integration test [Day 10]
 ```
 
 Catalog: `vstone_catalog` · Schemas: `raw`, `bronze`, `silver`, `gold`,
 `security` · Volumes (in `raw`): `landing`, `chunks`, `checkpoints`. All
-configurable via `databricks.yml` variables — nothing is hardcoded in the
-notebooks.
+configurable via `databricks.yml` variables — nothing hardcoded in the
+notebooks. **Compute is serverless throughout** — no job defines a classic
+cluster (Free Edition doesn't support them; this was a real bug caught and
+fixed on Day 10, see the assumptions doc).
 
 ## Repository structure
 
 ```
 vstone-databricks-pipeline/
-├── .github/workflows/databricks-ci-cd.yml   # CI: validate bundle, syntax-check, deploy to dev
-├── databricks.yml                           # DAB config — jobs, clusters, variables
+├── .github/workflows/databricks-ci-cd.yml   # CI: validate, deploy to dev, run full pipeline
+├── databricks.yml                           # DAB config — 10 jobs, 3 DLT pipelines, variables
 ├── src/
-│   ├── Notebooks/
-│   │   ├── 00_setup_infrastructure.py       # Catalog, schemas, volumes
-│   │   ├── 01_data_profiling.py             # Null/distinct/completeness audit, all 4 files
-│   │   └── 02_data_chunking.py              # Splits cars.csv into 4 chunks
+│   ├── Notebooks/                           # 22 files, Day 1 through Day 10
+│   │   ├── 00-02   Setup, profiling, chunking                        (Day 1)
+│   │   ├── 03      Bronze COPY INTO                                  (Day 2)
+│   │   ├── 04-07   Bronze Auto Loader / XML / DLT                    (Day 3)
+│   │   ├── 09-10   Silver: streets, cars/telegram/dimensions         (Day 4)
+│   │   ├── 11-12   Business rules (raining clip) + ACID/time-travel  (Day 5)
+│   │   ├── 13-15   Gold: dimensions, facts, aggregates               (Day 6)
+│   │   ├── 16-18   Performance benchmark, MERGE, churn metrics       (Day 7)
+│   │   ├── 19-21   RLS, CLS, resource usage dashboard queries        (Day 8-9)
+│   │   └── 22      Traffic insights dashboard queries                (Day 10, optional)
 │   └── utils/
 │       └── chunk_io.py                      # Shared single-file-write + reconciliation helpers
-├── tests/
-│   └── test_data_chunking.py                # Schema + row-count-reconciliation evidence
-├── docs/
-│   ├── requirements_and_assumptions.md
-│   └── data_mapping.md
+├── tests/                                   # 9 files, 60+ test methods, one per delivery day
+│   └── test_final_integration_day9.py       # Cross-layer reconciliation — the important one
+├── docs/                                    # 10 files — assumptions, data model, glossary,
+│                                             #   git workflow, dashboard setup guides, checklist
+├── deliverables/
+│   └── vstone_case_study.pptx               # Day 10 case study deck
 └── README.md
 ```
 
@@ -85,66 +100,96 @@ vstone-databricks-pipeline/
 ### Prerequisites
 - A Databricks **Free Edition** workspace (serverless compute; do not use a
   trial workspace — see project brief).
-- Databricks CLI configured locally if deploying manually (`databricks auth login`),
-  or `DATABRICKS_HOST` / `DATABRICKS_TOKEN` set as GitHub Actions repo secrets
-  for CI deployment.
-- `databricks.yml` → `workspace.host`: replace the placeholder with your own
-  workspace URL.
-
-### Data setup
-Upload the four raw files to the landing volume before running any job:
-```
-/Volumes/vstone_catalog/raw/landing/cars.csv
-/Volumes/vstone_catalog/raw/landing/telegram.csv
-/Volumes/vstone_catalog/raw/landing/node_locations.csv
-/Volumes/vstone_catalog/raw/landing/streets_list.csv
-```
-(Volumes are created by `00_setup_infrastructure` — run that job first, or
-upload after its first successful run.) Easiest path: Catalog Explorer →
-navigate to the `landing` volume → Upload, or `databricks fs cp` via the CLI.
+- Databricks CLI, authenticated: `databricks auth login --host <your-workspace-url>`
+- `databricks.yml` → `workspace.host`: replace the placeholder with your
+  real workspace URL. This is the one manual edit required before deploying.
+- (Optional, for RLS/CLS to actually restrict anyone) workspace groups:
+  `admin_group`, `safety_team`, `public_dashboard_group`.
 
 ### Deploy
 ```bash
 databricks bundle validate
 databricks bundle deploy --target dev
+```
+Syncs all notebooks/tests and creates all 10 jobs + 3 DLT pipelines as
+resources. Does **not** create the catalog or upload data — that's next.
+
+### Create infrastructure (run once)
+```bash
 databricks bundle run data_chunking_job --target dev
 ```
+Its first task creates `vstone_catalog` (all 5 schemas, 3 volumes). This
+run will fail at the profiling/chunking tasks the first time — expected,
+since the raw files aren't uploaded yet.
 
-## Execution order (Day 1)
+### Upload the 5 raw files
+```
+/Volumes/vstone_catalog/raw/landing/streets.csv
+/Volumes/vstone_catalog/raw/landing/cars.csv
+/Volumes/vstone_catalog/raw/landing/telegram.csv
+/Volumes/vstone_catalog/raw/landing/node_locations.csv
+/Volumes/vstone_catalog/raw/landing/streets_list.csv
+```
+Via Catalog Explorer → the `landing` volume → Upload, or `databricks fs cp`.
 
-1. `00_setup_infrastructure` — creates catalog/schemas/volumes.
-2. Upload the 4 raw files to the landing volume (manual step, see above).
-3. `01_data_profiling` — audits all 4 files; confirms the assumptions in
-   `docs/requirements_and_assumptions.md` (e.g. `enter`/`exit` value ranges,
-   the invalid sensor coordinate).
-4. `02_data_chunking` — splits `cars.csv` into the 4 named chunk files.
-5. `tests/test_data_chunking` — verifies file existence, schema, and
-   row-count reconciliation.
+### Run the full pipeline
+```bash
+databricks bundle run end_to_end_pipeline_job --target dev
+```
+Chains all 9 required-day jobs via `run_job_task`, ending in
+`test_final_integration_day9` — the cross-layer reconciliation test that
+actually catches things like orphaned dimension rows or wrong grain
+assumptions, not just per-table schema checks.
 
-All four are wired together as the **"Data Chunking"** job in `databricks.yml`
-with explicit `depends_on` ordering, so `databricks bundle run data_chunking_job`
-runs the whole sequence in one go.
+### Dashboards (manual UI step, by design)
+- **Resource usage** (PDF-required): `21_usage_analysis.py` →
+  `docs/day8_dashboard_setup.md`
+- **Traffic insights** (optional, strengthens the demo): `22_traffic_insights_queries.py`
+  → `docs/day10_traffic_insights_dashboard_setup.md`
 
-## Testing (Day 1)
+Both are guides, not checked-in `.lvdash.json` files — that JSON schema
+can't be validated without a live workspace to render it in, and a subtly
+wrong dashboard spec fails silently rather than erroring clearly. The SQL
+is the tested part; building the widgets is a ~5-10 minute UI task.
 
-`tests/test_data_chunking.py` checks, against the actual output of a run:
-- exactly the 4 expected chunk files exist,
-- chunk 1 & chunk 2 (CSV) schemas match the 5-column source schema exactly
-  (`assertSchemaEqual`),
-- chunk 3 (JSON) has the same 5 keys,
-- the 4 chunks' row counts sum exactly to the source row count,
-- the chunk 1 split ratio is within tolerance of the target 50%.
+### Genie space
+`docs/day6_genie_space_setup.md` — manual setup (reliable) plus a
+best-effort bundle-resource YAML block (flagged as unverified — `genie_space`
+is a very recent DAB resource type I don't have confirmed field syntax for).
 
-The chunking and profiling logic was also validated locally against a
-300,000-row sample of `cars.csv` and the full `telegram.csv` /
-`node_locations.csv` / `streets_list.csv` files before being finalized — see
-"Known limitations" in `docs/requirements_and_assumptions.md` for what
-still needs validating against the full file inside an actual workspace.
+## Testing
 
-## What's next (Day 2)
+9 test files, one per delivery day, 60+ test methods total. Two kinds:
+- **Per-day tests** check one layer's output in isolation (schema, nulls,
+  row counts, quarantine reasons).
+- **`test_final_integration_day9.py`** is different in kind — it
+  reconciles row counts *across* Bronze → Silver → Gold and checks every
+  fact/dimension pair for orphan FKs at once. This is the test that would
+  catch the two real bugs found during this build (see below) immediately,
+  instead of one test run at a time across separate days.
 
-- `feature/bronze-layer` branch.
-- `03_bronze_csv_copyinto.py` — ingest `cars_chunk_1.csv` via COPY INTO with
-  `load_dt`/`source` audit columns and table/column descriptions.
-- Bronze ingestion job added to `databricks.yml` alongside the existing
-  Data Chunking job.
+## Real bugs found and fixed during this build
+
+Documented in full, with real numbers, in `docs/requirements_and_assumptions.md`:
+
+1. **Orphaned dimension member.** `node_locations.csv` location=7 had
+   invalid `(0,0)` coordinates and was fully quarantined — but it was a
+   real sensor with 2.37M rows of valid data in `cars.csv`, a different
+   file. Orphaned 1,626,982 fact rows. Fixed by keeping the entity, nulling
+   only the bad attribute.
+2. **Wrong grain assumption.** `cars.csv` was assumed to dedupe on
+   `(location, date)`. Real data showed 0 true duplicates on that grain —
+   every "duplicate" was a distinct reading with a different `id`.
+   746,345 real rows were being silently dropped at one location alone.
+   Corrected grain: `(location, date, id)`.
+3. **Serverless compute violation.** Every job defined a classic
+   `new_cluster`, which Free Edition doesn't support at all — would have
+   failed on the first run of every single job. Fixed by removing all
+   cluster config; Databricks Jobs use serverless automatically.
+
+## Known limitations — not hidden
+
+See `docs/day10_final_deliverables_checklist.md`, section G, for the full
+list — including that `end_to_end_pipeline_job` has not yet been run
+start-to-finish as one continuous execution, only as individually-fixed
+pieces.
